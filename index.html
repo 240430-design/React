@@ -39,8 +39,12 @@
             cursor: pointer;
             transition: 0.3s;
         }
-        button#mainBtn:hover {
+        button#mainBtn:hover:not(:disabled) {
             background: #0069d9;
+        }
+        button#mainBtn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
         }
         .post {
             border: 1px solid #eaeaea;
@@ -77,11 +81,10 @@
         
         <button id="mainBtn">Опубликовать в облако</button>
 
-        <div id="feed" style="width: 100%; max-width: 500px;"></div>
+        <div id="feed"></div>
     </div>
 
     <script type="module">
-        // Импорт Firebase
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
         import {
             getFirestore,
@@ -96,8 +99,7 @@
             increment
         } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 
-        // Конфигурация Firebase (новый проект)
-         const firebaseConfig = {
+        const firebaseConfig = {
             apiKey: "AIzaSyChno_tsYbn7LOfiLdt8oJo0CpRL0lm2qo",
   authDomain: "mama-d42df.firebaseapp.com",
   projectId: "mama-d42df",
@@ -110,31 +112,35 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // === Обработка лайков (атомарное обновление) ===
+        // Лайк
         window.processLike = async (id) => {
             try {
                 const docRef = doc(db, "requests", id);
-                await updateDoc(docRef, {
-                    likes: increment(1)
-                });
+                await updateDoc(docRef, { likes: increment(1) });
             } catch (e) {
                 console.error("Ошибка лайка:", e);
+                alert("Не удалось поставить лайк");
             }
         };
 
-        // === Отправка формы с валидацией ===
-        document.getElementById("mainBtn").onclick = async () => {
+        // Отправка
+        document.getElementById("mainBtn").addEventListener("click", async () => {
             const btn = document.getElementById("mainBtn");
             const nameVal = document.getElementById("name").value.trim();
             const emailVal = document.getElementById("email").value.trim();
 
-            if (!nameVal || !emailVal) {
-                alert("Пожалуйста, заполните все поля");
+            if (!nameVal || nameVal.length < 2) {
+                alert("Имя должно содержать минимум 2 символа");
                 return;
             }
-
+            if (!emailVal || !emailVal.includes("@")) {
+                alert("Введите корректный email");
+                return;
+            }
             btn.disabled = true;
-          try {
+            btn.textContent = "Отправка...";
+
+            try {
                 await addDoc(collection(db, "requests"), {
                     name: nameVal,
                     email: emailVal,
@@ -142,23 +148,20 @@
                     timestamp: serverTimestamp()
                 });
 
-                // Очистка полей
                 document.getElementById("name").value = "";
                 document.getElementById("email").value = "";
-
+                alert("✅ Опубликовано успешно!");
             } catch (e) {
-                console.error("Validation Error:", e.message);
-                alert("Ошибка безопасности: Данные отклонены сервером.");
+                console.error(e);
+                alert("Ошибка при отправке: " + e.message);
             } finally {
                 btn.disabled = false;
+                btn.textContent = "Опубликовать в облако";
             }
-        };
+        });
 
-        // === Реал-тайм отображение постов ===
-        const q = query(
-            collection(db, "requests"),
-            orderBy("timestamp", "desc")
-        );
+        // Реал-тайм лента
+        const q = query(collection(db, "requests"), orderBy("timestamp", "desc"));
 
         onSnapshot(q, (snapshot) => {
             const feed = document.getElementById("feed");
@@ -168,18 +171,29 @@
                 const data = docSnap.data();
                 const docId = docSnap.id;
 
+                let timeStr = "только что";
+                if (data.timestamp) {
+                    try {
+                        const date = data.timestamp.toDate();
+                        timeStr = date.toLocaleString("ru-RU", { 
+                            hour: "2-digit", 
+                            minute: "2-digit", 
+                            day: "numeric", 
+                            month: "short" 
+                        });
+                    } catch (err) {}
+                }
+
                 const postHTML = 
                     <div class="post">
                         <b>${data.name || 'Аноним'}</b>
-                        <p style="margin: 5px 0;">${data.email || ''}</p>
+                        <p style="margin: 5px 0 8px;">${data.email || ''}</p>
                         
                         <button class="like-btn" onclick="processLike('${docId}')">
                             👍 ${data.likes || 0}
                         </button>
                         
-                        <span class="time">
-                            ${data.timestamp ? new Date(data.timestamp.toDate()).toLocaleTimeString() : ''}
-                        </span>
+                        <span class="time">${timeStr}</span>
                     </div>
                 ;
                 feed.innerHTML += postHTML;
