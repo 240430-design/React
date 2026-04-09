@@ -184,18 +184,18 @@
                     } catch (err) {}
                 }
 
-                const postHTML = 
-                    <div class="post">
-                        <b>${data.name || 'Аноним'}</b>
-                        <p style="margin: 5px 0 8px;">${data.email || ''}</p>
-                        
-                        <button class="like-btn" onclick="processLike('${docId}')">
-                            👍 ${data.likes || 0}
-                        </button>
-                        
-                        <span class="time">${timeStr}</span>
-                    </div>
-                ;
+                const postHTML = `
+    <div class="post">
+        <b>${data.name || 'Аноним'}</b>
+        <p style="margin: 5px 0 8px;">${data.email || ''}</p>
+        
+        <button class="like-btn" onclick="processLike('${docId}')">
+            👍 ${data.likes || 0}
+        </button>
+        
+        <span class="time">${timeStr}</span>
+    </div>
+`;
                 feed.innerHTML += postHTML;
             });
         });
