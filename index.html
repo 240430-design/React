@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Облачное приложение - Заявки</title>
+    <title>Облачное приложение - Заявки с фото</title>
     <style>
         * {
             margin: 0;
@@ -75,6 +75,7 @@
             font-weight: 600; 
             cursor: pointer; 
             transition: 0.3s; 
+            margin-top: 8px;
         }
         
         button:hover { 
@@ -125,6 +126,15 @@
             object-fit: cover;
         }
         
+        .post-image {
+            width: 100%;
+            max-height: 300px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+        
         .like-btn { 
             cursor: pointer; 
             border: none; 
@@ -168,6 +178,81 @@
             border-radius: 6px;
             margin-top: 10px;
         }
+
+        /* Стили для загрузки изображений */
+        .image-upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        
+        .image-upload-area:hover {
+            border-color: #007bff;
+            background: #f8f9fa;
+        }
+        
+        .image-preview {
+            max-width: 100%;
+            max-height: 200px;
+            margin: 10px 0;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        .remove-image {
+            background: #dc3545;
+            padding: 5px 10px;
+            font-size: 12px;
+            width: auto;
+            margin-top: 5px;
+        }
+        
+        .remove-image:hover {
+            background: #c82333;
+        }
+        
+        .upload-progress {
+            width: 100%;
+            height: 4px;
+            background: #f0f0f0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .upload-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: #007bff;
+            transition: width 0.3s;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            cursor: pointer;
+        }
+        
+        .modal img {
+            max-width: 90%;
+            max-height: 90%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            object-fit: contain;
+        }
     </style>
 </head>
 <body>
@@ -186,15 +271,33 @@
     <input type="text" id="name" placeholder="Имя профиля" readonly>
     <input type="email" id="email" placeholder="Ваш Email" readonly>
     <textarea id="content" placeholder="Что у вас нового?"></textarea>
+    
+    <!-- Область для загрузки изображений -->
+    <div id="imageUploadArea" class="image-upload-area">
+        📸 Нажмите или перетащите изображение сюда
+        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+    </div>
+    <img id="imagePreview" class="image-preview" alt="Preview">
+    <div class="upload-progress" id="uploadProgress">
+        <div class="upload-progress-bar" id="uploadProgressBar"></div>
+    </div>
+    <button id="removeImageBtn" class="remove-image" style="display: none;">🗑 Удалить изображение</button>
+    
     <button id="mainBtn">Отправить в облако</button>
 </div>
 
 <div id="feed" style="width: 100%; max-width: 500px;"></div>
 
+<!-- Модальное окно для просмотра изображений -->
+<div id="imageModal" class="modal">
+    <img id="modalImage" src="" alt="Full size">
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, updateDoc, doc, increment } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyChno_tsYbn7LOfiLdt8oJo0CpRL0lm2qo",
@@ -210,6 +313,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const storage = getStorage(app);
 const provider = new GoogleAuthProvider();
 
 // DOM элементы
@@ -224,6 +328,109 @@ const emailInput = document.getElementById('email');
 const contentTextarea = document.getElementById('content');
 const mainBtn = document.getElementById('mainBtn');
 const feedDiv = document.getElementById('feed');
+const imageInput = document.getElementById('imageInput');
+const imageUploadArea = document.getElementById('imageUploadArea');
+const imagePreview = document.getElementById('imagePreview');
+const removeImageBtn = document.getElementById('removeImageBtn');
+const uploadProgress = document.getElementById('uploadProgress');
+const uploadProgressBar = document.getElementById('uploadProgressBar');
+const imageModal = document.getElementById('imageModal');
+const modalImage = document.getElementById('modalImage');
+
+// Переменные для хранения загруженного изображения
+let selectedImageFile = null;
+let currentImageUrl = null;
+
+// --- ФУНКЦИИ ДЛЯ РАБОТЫ С ИЗОБРАЖЕНИЯМИ ---
+
+// Загрузка изображения в Storage
+async function uploadImage(imageFile, userId) {
+    return new Promise((resolve, reject) => {
+        const timestamp = Date.now();
+        const fileName = `${userId}_${timestamp}_${imageFile.name}`;
+        const storageRef = ref(storage, `post_images/${fileName}`);
+        const uploadTask = uploadBytesResumable(storageRef, imageFile);
+        
+        // Показываем прогресс загрузки
+        uploadProgress.style.display = 'block';
+        
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                // Обновляем прогресс
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                uploadProgressBar.style.width = `${progress}%`;
+            },
+            (error) => {
+                // Ошибка загрузки
+                console.error("Ошибка загрузки:", error);
+                uploadProgress.style.display = 'none';
+                reject(error);
+            },
+            async () => {
+                // Загрузка завершена успешно
+                const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                uploadProgress.style.display = 'none';
+                uploadProgressBar.style.width = '0%';
+                resolve(downloadURL);
+            }
+        );
+    });
+}
+
+// Удаление изображения из Storage
+async function deleteImage(imageUrl) {
+    if (!imageUrl) return;
+    try {
+        const imageRef = ref(storage, imageUrl);
+        await deleteObject(imageRef);
+        console.log("Изображение удалено");
+    } catch (error) {
+        console.error("Ошибка удаления изображения:", error);
+    }
+}
+
+// Обработка выбора изображения
+function handleImageSelect(file) {
+    if (!file) return;
+    
+    // Проверка типа файла
+    if (!file.type.startsWith('image/')) {
+        alert("Пожалуйста, выберите изображение!");
+        return;
+    }
+    
+    // Проверка размера (максимум 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+        alert("Изображение не должно превышать 5MB!");
+        return;
+    }
+    
+    selectedImageFile = file;
+    
+    // Превью изображения
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        imagePreview.src = e.target.result;
+        imagePreview.style.display = 'block';
+        removeImageBtn.style.display = 'block';
+        imageUploadArea.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+}
+
+// Очистка выбранного изображения
+function clearSelectedImage() {
+    if (currentImageUrl) {
+        deleteImage(currentImageUrl);
+        currentImageUrl = null;
+    }
+    selectedImageFile = null;
+    imagePreview.style.display = 'none';
+    imagePreview.src = '';
+    removeImageBtn.style.display = 'none';
+    imageUploadArea.style.display = 'block';
+    imageInput.value = '';
+}
 
 // --- ЛОГИКА АВТОРИЗАЦИИ ---
 loginBtn.onclick = () => signInWithPopup(auth, provider);
@@ -231,29 +438,54 @@ logoutBtn.onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        // Пользователь авторизован
         loginBtn.style.display = 'none';
         userInfo.style.display = 'flex';
         messageForm.style.display = 'block';
         
-        // Заполняем данные пользователя
         userNameSpan.innerText = user.displayName || user.email;
         userPhotoImg.src = user.photoURL || 'https://via.placeholder.com/40';
         nameInput.value = user.displayName || '';
         emailInput.value = user.email || '';
     } else {
-        // Пользователь не авторизован
         loginBtn.style.display = 'block';
         userInfo.style.display = 'none';
         messageForm.style.display = 'none';
-        
-        // Очищаем форму
-        if (contentTextarea) contentTextarea.value = '';
+        contentTextarea.value = '';
+        clearSelectedImage();
     }
 });
 
+// --- ОБРАБОТЧИКИ ДЛЯ ЗАГРУЗКИ ИЗОБРАЖЕНИЙ ---
+imageUploadArea.onclick = () => imageInput.click();
+imageUploadArea.ondragover = (e) => {
+    e.preventDefault();
+    imageUploadArea.style.borderColor = '#007bff';
+    imageUploadArea.style.background = '#f8f9fa';
+};
+imageUploadArea.ondragleave = (e) => {
+    e.preventDefault();
+    imageUploadArea.style.borderColor = '#ddd';
+    imageUploadArea.style.background = 'transparent';
+};
+imageUploadArea.ondrop = (e) => {
+    e.preventDefault();
+    imageUploadArea.style.borderColor = '#ddd';
+    imageUploadArea.style.background = 'transparent';
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) {
+        handleImageSelect(file);
+    }
+};
+
+imageInput.onchange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+        handleImageSelect(e.target.files[0]);
+    }
+};
+
+removeImageBtn.onclick = () => clearSelectedImage();
+
 // --- ЛОГИКА РАБОТЫ С ДАННЫМИ ---
-// Функция для обработки лайков (глобальная для вызова из HTML)
 window.processLike = async (id) => {
     try {
         const postRef = doc(db, "requests", id);
@@ -266,12 +498,26 @@ window.processLike = async (id) => {
     }
 };
 
+// Открытие модального окна для просмотра изображения
+window.openImage = (imageUrl) => {
+    if (imageUrl) {
+        modalImage.src = imageUrl;
+        imageModal.style.display = 'block';
+    }
+};
+
+// Закрытие модального окна
+imageModal.onclick = () => {
+    imageModal.style.display = 'none';
+    modalImage.src = '';
+};
+
 // Отправка новой записи
 mainBtn.onclick = async () => {
     const content = contentTextarea.value.trim();
     
-    if (!content) {
-        alert("Введите текст сообщения!");
+    if (!content && !selectedImageFile) {
+        alert("Введите текст сообщения или добавьте изображение!");
         return;
     }
     
@@ -281,24 +527,34 @@ mainBtn.onclick = async () => {
         return;
     }
     
-    // Блокируем кнопку на время отправки
     mainBtn.disabled = true;
     mainBtn.textContent = "Отправка...";
     
     try {
+        let imageUrl = null;
+        
+        // Если есть изображение, загружаем его
+        if (selectedImageFile) {
+            imageUrl = await uploadImage(selectedImageFile, user.uid);
+            currentImageUrl = imageUrl;
+        }
+        
+        // Сохраняем пост в Firestore
         await addDoc(collection(db, "requests"), {
             name: user.displayName || "Аноним",
             email: user.email,
             photo: user.photoURL || "https://via.placeholder.com/35",
-            text: content,
+            text: content || "",
+            imageUrl: imageUrl,
             likes: 0,
             timestamp: serverTimestamp()
         });
         
-        // Очищаем поле ввода
+        // Очищаем форму
         contentTextarea.value = "";
+        clearSelectedImage();
         
-        // Небольшое уведомление об успехе
+        // Уведомление об успехе
         const successMsg = document.createElement('div');
         successMsg.textContent = "✓ Запись опубликована!";
         successMsg.style.color = "#00b894";
@@ -309,7 +565,7 @@ mainBtn.onclick = async () => {
         
     } catch (e) {
         console.error("Ошибка при добавлении:", e);
-        alert("Ошибка безопасности! Проверьте правила (Rules) в Firebase.\n" + e.message);
+        alert("Ошибка! Проверьте правила безопасности Firebase.\n" + e.message);
     } finally {
         mainBtn.disabled = false;
         mainBtn.textContent = "Отправить в облако";
@@ -338,7 +594,8 @@ onSnapshot(q, (snapshot) => {
                     <b>${escapeHtml(data.name || 'Аноним')}</b>
                     <span class="time">${formattedTime}</span>
                 </div>
-                <div class="post-text">${escapeHtml(data.text || data.email || '')}</div>
+                <div class="post-text">${escapeHtml(data.text || '')}</div>
+                ${data.imageUrl ? `<img src="${data.imageUrl}" class="post-image" onclick="openImage('${data.imageUrl}')" alt="Post image">` : ''}
                 <button class="like-btn" onclick="processLike('${doc.id}')">
                     ❤️ ${data.likes || 0}
                 </button>
@@ -363,7 +620,7 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
-console.log("Приложение запущено. Для тестов используйте консоль F12");
+console.log("Приложение запущено с поддержкой загрузки изображений!");
 </script>
 </body>
 </html>
