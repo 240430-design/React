@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Личные сообщения - Чат</title>
+    <title>Личные сообщения - Чат с тестовыми пользователями</title>
     <style>
         * {
             margin: 0;
@@ -375,6 +375,55 @@
             padding: 5px 20px;
             font-style: italic;
         }
+
+        /* Кнопка добавления тестовых пользователей */
+        .add-test-users-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            display: none;
+        }
+
+        .add-test-users-btn:hover {
+            background: #218838;
+            transform: scale(1.05);
+        }
+
+        /* Уведомления */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            z-index: 2000;
+            animation: slideIn 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
     </style>
 </head>
 <body>
@@ -430,6 +479,9 @@
     </div>
 </div>
 
+<!-- Кнопка добавления тестовых пользователей -->
+<button id="addTestUsersBtn" class="add-test-users-btn">➕ Добавить тестовых пользователей</button>
+
 <!-- Модальное окно для просмотра изображений -->
 <div id="imageModal" class="modal">
     <img id="modalImage" src="" alt="">
@@ -444,7 +496,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
 import { 
     getAuth, signInWithPopup, GoogleAuthProvider, signOut, 
-    onAuthStateChanged 
+    onAuthStateChanged, createUserWithEmailAndPassword, updateProfile 
 } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
 import { 
     getStorage, ref, uploadBytesResumable, getDownloadURL 
@@ -488,6 +540,7 @@ const imageFileInput = document.getElementById('imageFileInput');
 const typingIndicator = document.getElementById('typingIndicator');
 const imageModal = document.getElementById('imageModal');
 const modalImage = document.getElementById('modalImage');
+const addTestUsersBtn = document.getElementById('addTestUsersBtn');
 
 // Состояние
 let currentUser = null;
@@ -495,21 +548,99 @@ let currentChatUser = null;
 let currentChatId = null;
 let messagesUnsubscribe = null;
 let typingTimeout = null;
-let isTyping = false;
 
-// Функции
+// Функция для показа уведомлений
+function showNotification(message, isError = false) {
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.style.background = isError ? '#dc3545' : '#28a745';
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+}
+
+// Функция для добавления тестового пользователя
+async function addTestUser(email, displayName, photoURL = null) {
+    try {
+        // Создаем пользователя в Authentication
+        const userCredential = await createUserWithEmailAndPassword(auth, email, 'test123456');
+        const user = userCredential.user;
+        
+        // Обновляем профиль
+        await updateProfile(user, {
+            displayName: displayName,
+            photoURL: photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=007bff&color=fff&bold=true`
+        });
+        
+        // Сохраняем в Firestore
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, {
+            uid: user.uid,
+            displayName: displayName,
+            email: email,
+            photoURL: user.photoURL,
+            lastSeen: serverTimestamp(),
+            isTest: true,
+            createdAt: serverTimestamp()
+        });
+        
+        console.log(`✅ Пользователь ${displayName} создан!`);
+        showNotification(`✅ Пользователь ${displayName} добавлен!`);
+        return user;
+    } catch (error) {
+        console.error('Ошибка создания:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            showNotification(`⚠️ Пользователь ${displayName} уже существует`, true);
+        } else {
+            showNotification(`❌ Ошибка: ${error.message}`, true);
+        }
+        return null;
+    }
+}
+
+// Функция для добавления всех тестовых пользователей
+async function addAllTestUsers() {
+    addTestUsersBtn.disabled = true;
+    addTestUsersBtn.textContent = '⏳ Добавление...';
+    
+    const testUsers = [
+        { name: "Алмас Дуйсенбек", email: "almas@test.com", role: "admin" },
+        { name: "Бауыржан", email: "bau@test.com" },
+        { name: "Дана", email: "dana@test.com" },
+        { name: "Ерлан", email: "erlan@test.com" },
+        { name: "Гульнара", email: "gulnara@test.com" },
+        { name: "Марат", email: "marat@test.com" },
+        { name: "Айгуль", email: "aigul@test.com" },
+        { name: "Руслан", email: "ruslan@test.com" }
+    ];
+    
+    for (const user of testUsers) {
+        await addTestUser(user.email, user.name);
+        // Небольшая задержка между созданием пользователей
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    addTestUsersBtn.disabled = false;
+    addTestUsersBtn.textContent = '➕ Добавить тестовых пользователей';
+    showNotification('✅ Все тестовые пользователи добавлены!');
+    
+    // Обновляем список диалогов если нужно
+    if (currentUser) {
+        loadDialogs();
+    }
+}
+
+// Функции для работы с чатом
 function getAvatarUrl(name, photoURL) {
     if (photoURL && photoURL !== 'null') return photoURL;
     const initial = name ? name.charAt(0).toUpperCase() : '?';
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(initial)}&background=007bff&color=fff&bold=true&size=40`;
 }
 
-// Создание или получение ID чата
 function getChatId(user1Id, user2Id) {
     return [user1Id, user2Id].sort().join('_');
 }
 
-// Загрузка изображения
 async function uploadMessageImage(file, userId) {
     const timestamp = Date.now();
     const fileName = `chat_images/${userId}_${timestamp}_${file.name}`;
@@ -527,7 +658,6 @@ async function uploadMessageImage(file, userId) {
     });
 }
 
-// Отправка сообщения
 async function sendMessage(text, imageUrl = null) {
     if (!text && !imageUrl) return;
     if (!currentUser || !currentChatUser) return;
@@ -545,7 +675,6 @@ async function sendMessage(text, imageUrl = null) {
             read: false
         });
         
-        // Обновляем последнее сообщение в диалоге
         const chatRef = doc(db, 'chats', chatId);
         await setDoc(chatRef, {
             lastMessage: text || '📷 Изображение',
@@ -564,11 +693,10 @@ async function sendMessage(text, imageUrl = null) {
         
     } catch (error) {
         console.error('Ошибка отправки:', error);
-        alert('Ошибка отправки сообщения');
+        showNotification('Ошибка отправки сообщения', true);
     }
 }
 
-// Загрузка сообщений чата
 function loadMessages(chatId, otherUser) {
     if (messagesUnsubscribe) {
         messagesUnsubscribe();
@@ -610,13 +738,10 @@ function loadMessages(chatId, otherUser) {
         });
         
         messagesArea.scrollTop = messagesArea.scrollHeight;
-        
-        // Отмечаем сообщения как прочитанные
         markMessagesAsRead(chatId);
     });
 }
 
-// Отметка сообщений как прочитанных
 async function markMessagesAsRead(chatId) {
     if (!currentUser) return;
     
@@ -630,16 +755,16 @@ async function markMessagesAsRead(chatId) {
     });
     await batch.commit();
     
-    // Сбрасываем счетчик непрочитанных
     const chatRef = doc(db, 'chats', chatId);
     await updateDoc(chatRef, {
         [`unread_${currentUser.uid}`]: 0
     });
 }
 
-// Загрузка списка диалогов
 function loadDialogs() {
-    const q = query(collection(db, 'chats'), where(`participants`, 'array-contains', currentUser.uid));
+    if (!currentUser) return;
+    
+    const q = query(collection(db, 'chats'), where('participants', 'array-contains', currentUser.uid));
     
     onSnapshot(q, (snapshot) => {
         dialogsList.innerHTML = '';
@@ -684,28 +809,25 @@ function loadDialogs() {
         });
         
         if (dialogs.length === 0) {
-            dialogsList.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">Нет диалогов</div>';
+            dialogsList.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">Нет диалогов. Начните чат с пользователем!</div>';
         }
     });
 }
 
-// Поиск пользователей
-async function searchUsers(query) {
-    if (!query || query.length < 2) {
+async function searchUsers(queryText) {
+    if (!queryText || queryText.length < 2) {
         usersDropdown.style.display = 'none';
         return;
     }
     
-    // Здесь нужно получить список пользователей из отдельной коллекции users
-    // Для примера - заглушка
     const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('displayName', '>=', query), where('displayName', '<=', query + '\uf8ff'), limit(5));
+    const q = query(usersRef, where('displayName', '>=', queryText), where('displayName', '<=', queryText + '\uf8ff'), limit(5));
     const snapshot = await getDocs(q);
     
     usersDropdown.innerHTML = '';
     snapshot.forEach((doc) => {
         const user = doc.data();
-        if (user.uid !== currentUser.uid) {
+        if (user.uid !== currentUser?.uid) {
             const userDiv = document.createElement('div');
             userDiv.className = 'user-item';
             userDiv.innerHTML = `
@@ -720,7 +842,6 @@ async function searchUsers(query) {
     usersDropdown.style.display = snapshot.empty ? 'none' : 'block';
 }
 
-// Открытие чата
 async function openChat(userId, userName, userPhoto) {
     if (!currentUser) return;
     
@@ -743,7 +864,6 @@ async function openChat(userId, userName, userPhoto) {
     usersDropdown.style.display = 'none';
     searchInput.value = '';
     
-    // Создаем чат если его нет
     const chatRef = doc(db, 'chats', currentChatId);
     const chatDoc = await getDoc(chatRef);
     if (!chatDoc.exists()) {
@@ -762,7 +882,6 @@ async function openChat(userId, userName, userPhoto) {
     }
 }
 
-// Форматирование времени
 function formatTime(date) {
     if (!date) return '';
     const now = new Date();
@@ -774,21 +893,17 @@ function formatTime(date) {
     }
 }
 
-// Отслеживание печатания
-messageInput.addEventListener('input', () => {
-    if (!currentChatId || !currentUser) return;
-    
-    if (typingTimeout) clearTimeout(typingTimeout);
-    
-    const typingRef = doc(db, 'chats', currentChatId, 'typing', currentUser.uid);
-    setDoc(typingRef, { typing: true, timestamp: serverTimestamp() });
-    
-    typingTimeout = setTimeout(async () => {
-        await setDoc(typingRef, { typing: false });
-    }, 2000);
-});
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
 
-// Отправка сообщения
+// Обработчики событий
 sendBtn.onclick = async () => {
     const text = messageInput.value.trim();
     if (text) {
@@ -805,13 +920,17 @@ messageInput.addEventListener('keypress', (e) => {
     }
 });
 
-// Загрузка изображений
+messageInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+});
+
 imageUploadBtn.onclick = () => imageFileInput.click();
 imageFileInput.onchange = async (e) => {
     const file = e.target.files[0];
     if (file && file.type.startsWith('image/')) {
         if (file.size > 5 * 1024 * 1024) {
-            alert('Изображение не должно превышать 5MB');
+            showNotification('Изображение не должно превышать 5MB', true);
             return;
         }
         const imageUrl = await uploadMessageImage(file, currentUser.uid);
@@ -820,7 +939,6 @@ imageFileInput.onchange = async (e) => {
     imageFileInput.value = '';
 };
 
-// Открытие изображения
 window.openImage = (url) => {
     modalImage.src = url;
     imageModal.style.display = 'block';
@@ -830,7 +948,6 @@ imageModal.onclick = () => {
     modalImage.src = '';
 };
 
-// Поиск пользователей
 let searchTimeout;
 searchInput.addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
@@ -841,35 +958,6 @@ document.addEventListener('click', (e) => {
         usersDropdown.style.display = 'none';
     }
 });
-
-// Обработка печати
-function listenTyping() {
-    if (!currentChatId) return;
-    
-    const typingRef = collection(db, 'chats', currentChatId, 'typing');
-    onSnapshot(typingRef, (snapshot) => {
-        let someoneTyping = false;
-        snapshot.forEach((doc) => {
-            const data = doc.data();
-            if (doc.id !== currentUser?.uid && data.typing && data.timestamp?.toDate() > new Date(Date.now() - 3000)) {
-                someoneTyping = true;
-            }
-        });
-        typingIndicator.style.display = someoneTyping ? 'block' : 'none';
-        typingIndicator.innerText = someoneTyping ? '✏️ Пользователь печатает...' : '';
-    });
-}
-
-// Escape HTML
-function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
-    });
-}
 
 // Авторизация
 loginBtn.onclick = () => signInWithPopup(auth, provider);
@@ -885,10 +973,10 @@ onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         loginScreen.style.display = 'none';
         chatScreen.style.display = 'flex';
+        addTestUsersBtn.style.display = 'block';
         currentUserAvatar.src = getAvatarUrl(user.displayName, user.photoURL);
         currentUserName.innerText = user.displayName;
         
-        // Сохраняем пользователя в коллекцию users
         const userRef = doc(db, 'users', user.uid);
         await setDoc(userRef, {
             uid: user.uid,
@@ -899,22 +987,19 @@ onAuthStateChanged(auth, async (user) => {
         }, { merge: true });
         
         loadDialogs();
-        listenTyping();
     } else {
         currentUser = null;
         loginScreen.style.display = 'flex';
         chatScreen.style.display = 'none';
+        addTestUsersBtn.style.display = 'none';
         if (messagesUnsubscribe) messagesUnsubscribe();
         currentChatUser = null;
         currentChatId = null;
     }
 });
 
-// Авто-изменение высоты textarea
-messageInput.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 100) + 'px';
-});
+// Кнопка добавления тестовых пользователей
+addTestUsersBtn.onclick = addAllTestUsers;
 </script>
 </body>
 </html>
